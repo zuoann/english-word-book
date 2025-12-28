@@ -3,135 +3,343 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GPT 单词库查看器</title>
+    <title>GPT 互动英语学习助手</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        .markdown-content h3 { font-weight: bold; font-size: 1.25rem; margin-top: 1rem; margin-bottom: 0.5rem; color: #1e40af; }
-        .markdown-content p { margin-bottom: 0.75rem; line-height: 1.6; }
-        .markdown-content ul { list-style-type: disc; padding-left: 1.5rem; margin-bottom: 1rem; }
-        .word-card:hover { transform: translateY(-2px); transition: all 0.2s; }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        
+        .perspective-1000 { perspective: 1000px; }
+        .backface-hidden { backface-visibility: hidden; }
+        .rotate-y-180 { transform: rotateY(180deg); }
+        .transform-style-3d { transform-style: preserve-3d; }
+        
+        .card-inner {
+            transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .flipped { transform: rotateY(180deg); }
+
+        /* 自定义 Markdown 样式 */
+        .content-body h3 { font-weight: bold; color: #2563eb; margin-top: 8px; border-left: 3px solid #2563eb; padding-left: 8px; }
+        .content-body p { margin-bottom: 4px; }
+        
+        @keyframes celebrate {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+        .animate-celebrate { animation: celebrate 0.5s ease-out; }
     </style>
 </head>
-<body class="bg-slate-50 min-h-screen">
+<body class="bg-indigo-50 min-h-screen pb-20">
 
-    <div class="max-w-4xl mx-auto px-4 py-8">
-        <header class="mb-8 text-center">
-            <h1 class="text-3xl font-bold text-slate-800 mb-2">GPT 英语单词库</h1>
-            <p class="text-slate-600">加载并浏览您的词库文件</p>
-        </header>
+    <!-- 顶部状态栏 -->
+    <nav class="bg-white shadow-sm sticky top-0 z-30 px-4 py-3">
+        <div class="max-w-4xl mx-auto flex justify-between items-center">
+            <div class="flex items-center gap-2">
+                <div class="bg-indigo-600 text-white p-2 rounded-lg">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                    </svg>
+                </div>
+                <span class="font-bold text-xl text-slate-800 tracking-tight">GPT Learner</span>
+            </div>
+            
+            <div class="flex items-center gap-6 text-sm font-medium">
+                <div class="flex items-center gap-1 text-orange-500">
+                    <span>🔥</span> <span id="streakVal">0</span> 天
+                </div>
+                <div class="flex items-center gap-1 text-blue-600">
+                    <span>💎</span> <span id="xpVal">0</span> XP
+                </div>
+            </div>
+        </div>
+    </nav>
 
-        <!-- 搜索和过滤 -->
-        <div class="sticky top-4 z-10 bg-white p-4 rounded-xl shadow-md mb-6 flex gap-4">
-            <input type="text" id="searchInput" placeholder="搜索单词..." 
-                class="flex-1 px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-            <button id="loadBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg transition-colors shadow-sm">
-                载入数据
+    <div class="max-w-4xl mx-auto px-4 mt-6">
+        
+        <!-- 加载数据/设置 -->
+        <div id="fileLoader" class="bg-white rounded-2xl p-8 text-center shadow-xl border-2 border-dashed border-indigo-200 mb-8">
+            <h2 class="text-2xl font-bold mb-4">准备好开始了吗？</h2>
+            <p class="text-slate-500 mb-6">点击下方按钮加载您的词库文件 <code class="bg-slate-100 px-1 rounded">gptwords.json</code></p>
+            <button id="loadBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-3 rounded-full font-bold transition-all transform hover:scale-105 shadow-lg flex items-center gap-2 mx-auto">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                </svg>
+                载入词库
             </button>
+            <p id="errorMsg" class="mt-4 text-red-500 text-sm hidden"></p>
         </div>
 
-        <!-- 状态提示 -->
-        <div id="status" class="hidden mb-4 p-3 rounded-lg text-sm text-center"></div>
-
-        <!-- 单词列表 -->
-        <div id="wordList" class="space-y-4">
-            <div class="text-center py-20 text-slate-400">
-                <p>点击“载入数据”开始读取 gptwords.json</p>
-                <p class="text-xs mt-2 text-slate-400">请确保文件与本页面在同一目录下</p>
+        <!-- 主操作区 -->
+        <div id="mainApp" class="hidden">
+            
+            <!-- 模式导航 -->
+            <div class="flex bg-white p-1 rounded-xl shadow-sm mb-6 max-w-sm mx-auto">
+                <button onclick="switchMode('explore')" id="btn-explore" class="flex-1 py-2 text-sm font-bold rounded-lg transition-all bg-indigo-600 text-white">探索</button>
+                <button onclick="switchMode('cards')" id="btn-cards" class="flex-1 py-2 text-sm font-bold rounded-lg transition-all text-slate-500 hover:bg-slate-50">闪卡</button>
+                <button onclick="switchMode('quiz')" id="btn-quiz" class="flex-1 py-2 text-sm font-bold rounded-lg transition-all text-slate-500 hover:bg-slate-50">挑战</button>
             </div>
+
+            <!-- 1. 探索模式 -->
+            <div id="mode-explore" class="space-y-4">
+                <div class="flex gap-4 mb-6">
+                    <input type="text" id="searchInput" placeholder="搜索任何单词或意思..." class="flex-1 px-4 py-3 rounded-xl border-none shadow-sm focus:ring-2 focus:ring-indigo-500">
+                </div>
+                <div id="exploreList" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+            </div>
+
+            <!-- 2. 闪卡模式 -->
+            <div id="mode-cards" class="hidden text-center">
+                <div class="relative w-full max-w-md mx-auto aspect-[3/4] perspective-1000 group">
+                    <div id="flashcard" class="card-inner relative w-full h-full transform-style-3d cursor-pointer shadow-2xl rounded-3xl" onclick="flipCard()">
+                        <!-- 正面 -->
+                        <div class="absolute inset-0 backface-hidden bg-white flex flex-col items-center justify-center p-10 rounded-3xl border-4 border-indigo-100">
+                            <span class="text-sm text-indigo-400 font-bold uppercase tracking-widest mb-4">Word</span>
+                            <h2 id="cardWord" class="text-5xl font-extrabold text-slate-800 break-words w-full text-center">---</h2>
+                            <p class="mt-12 text-slate-400 text-sm italic">点击翻转查看释义</p>
+                        </div>
+                        <!-- 背面 -->
+                        <div class="absolute inset-0 backface-hidden rotate-y-180 bg-indigo-600 text-white flex flex-col p-8 rounded-3xl overflow-y-auto">
+                            <span class="text-sm text-indigo-200 font-bold uppercase tracking-widest mb-4 text-center">Meaning</span>
+                            <div id="cardContent" class="content-body text-left text-sm leading-relaxed text-indigo-50"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="mt-8 flex justify-center gap-4">
+                    <button onclick="prevCard()" class="p-4 bg-white rounded-full shadow-md text-slate-600 hover:text-indigo-600">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" /></svg>
+                    </button>
+                    <button onclick="markMasteredFromCard()" class="px-8 py-4 bg-green-500 text-white rounded-full shadow-lg font-bold hover:bg-green-600 transition-all flex items-center gap-2">
+                        <span>✅</span> 标记已掌握
+                    </button>
+                    <button onclick="nextCard()" class="p-4 bg-white rounded-full shadow-md text-slate-600 hover:text-indigo-600">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+                    </button>
+                </div>
+                <p class="mt-4 text-slate-400 text-sm">卡片: <span id="cardProgress">0/0</span></p>
+            </div>
+
+            <!-- 3. 挑战模式 -->
+            <div id="mode-quiz" class="hidden">
+                <div class="bg-white rounded-3xl p-8 shadow-xl max-w-2xl mx-auto border border-indigo-50">
+                    <div class="flex justify-between items-center mb-6">
+                        <span class="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full text-xs font-bold uppercase">Quiz Challenge</span>
+                        <span id="quizScore" class="font-bold text-indigo-600">得分: 0</span>
+                    </div>
+                    <h2 class="text-sm text-slate-400 mb-2">这个单词是什么意思？</h2>
+                    <h3 id="quizWord" class="text-4xl font-black text-slate-800 mb-8">---</h3>
+                    <div id="quizOptions" class="grid grid-cols-1 gap-3">
+                        <!-- 选项 -->
+                    </div>
+                    <div id="quizFeedback" class="mt-6 hidden p-4 rounded-xl text-center font-bold"></div>
+                </div>
+            </div>
+
         </div>
     </div>
 
+    <!-- 底部消息提示 (代替 alert) -->
+    <div id="toast" class="fixed bottom-10 left-1/2 -translate-x-1/2 transform scale-0 transition-transform bg-slate-800 text-white px-6 py-3 rounded-full shadow-2xl z-50 flex items-center gap-2">
+        <span id="toastIcon">💡</span>
+        <span id="toastMsg">消息内容</span>
+    </div>
+
     <script>
-        let allWords = [];
-        const wordListEl = document.getElementById('wordList');
-        const searchInput = document.getElementById('searchInput');
-        const statusEl = document.getElementById('status');
-        const loadBtn = document.getElementById('loadBtn');
+        // 核心状态
+        let words = [];
+        let masteredWords = new Set(JSON.parse(localStorage.getItem('masteredWords') || '[]'));
+        let xp = parseInt(localStorage.getItem('xp') || '0');
+        let streak = parseInt(localStorage.getItem('streak') || '1');
+        let currentMode = 'explore';
+        let cardIdx = 0;
+        let quizTarget = null;
 
-        function showStatus(msg, type = 'info') {
-            statusEl.textContent = msg;
-            statusEl.className = `mb-4 p-3 rounded-lg text-sm text-center ${
-                type === 'error' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'
-            }`;
-            statusEl.classList.remove('hidden');
-        }
+        // 初始化显示
+        updateStats();
 
-        // 解析逻辑：兼容标准 JSON 和 JSONL (每行一个对象)
-        async function parseGptJson(text) {
-            text = text.trim();
-            // 尝试直接解析为标准 JSON
-            try {
-                if (text.startsWith('[') && text.endsWith(']')) {
-                    return JSON.parse(text);
-                }
-            } catch (e) {}
-
-            // 如果失败，尝试按行解析 (JSONL 格式)
-            showStatus("检测到非标准格式，正在尝试逐行解析...", "info");
-            const lines = text.split('\n');
-            const result = [];
-            for (let line of lines) {
-                if (line.trim()) {
-                    try {
-                        result.push(JSON.parse(line));
-                    } catch (e) {
-                        console.error("解析单行失败:", e);
-                    }
-                }
-            }
-            return result;
-        }
-
-        async function loadData() {
-            loadBtn.disabled = true;
-            loadBtn.textContent = '加载中...';
-            showStatus("正在请求文件...");
-
-            try {
-                // 如果在本地双击打开（file:// 协议），fetch 可能会失败
-                if (window.location.protocol === 'file:') {
-                    throw new Error("浏览器安全限制：请使用本地服务器打开此页面（如使用 VS Code 的 Live Server 或 Python 的 http.server）");
-                }
-
-                const response = await fetch('gptwords.json');
-                if (!response.ok) throw new Error(`无法找到文件: ${response.status}`);
-                
-                const rawText = await response.text();
-                allWords = await parseGptJson(rawText);
-                
-                showStatus(`成功加载 ${allWords.length} 个单词`, "success");
-                renderWords(allWords);
-            } catch (err) {
-                showStatus(err.message, "error");
-                console.error(err);
-            } finally {
-                loadBtn.disabled = false;
-                loadBtn.textContent = '重新载入';
-            }
-        }
-
-        function renderWords(words) {
-            if (words.length === 0) {
-                wordListEl.innerHTML = '<div class="text-center py-10 text-slate-400">没有找到匹配的单词</div>';
-                return;
-            }
-
-            // 仅渲染前 100 个以保证性能，搜索时全量搜索
-            const displayWords = words.slice(0, 100);
+        // 加载逻辑
+        document.getElementById('loadBtn').onclick = async () => {
+            const btn = document.getElementById('loadBtn');
+            const err = document.getElementById('errorMsg');
+            btn.textContent = '加载中...';
             
-            wordListEl.innerHTML = displayWords.map(item => `
-                <div class="word-card bg-white p-6 rounded-xl shadow-sm border border-slate-100">
-                    <h2 class="text-2xl font-bold text-blue-700 mb-3">${item.word}</h2>
-                    <div class="markdown-content text-slate-700 whitespace-pre-wrap">${formatContent(item.content)}</div>
+            try {
+                if (window.location.protocol === 'file:') {
+                    throw new Error("请通过服务器运行此页面（如 Live Server）");
+                }
+                const res = await fetch('gptwords.json');
+                if (!res.ok) throw new Error("文件未找到");
+                
+                const text = await res.text();
+                words = parseGptJson(text);
+                
+                if (words.length > 0) {
+                    document.getElementById('fileLoader').classList.add('hidden');
+                    document.getElementById('mainApp').classList.remove('hidden');
+                    renderExplore();
+                    updateFlashcard();
+                    showToast("成功加载词库！", "🎉");
+                }
+            } catch (e) {
+                err.textContent = e.message;
+                err.classList.remove('hidden');
+                btn.textContent = '重试载入';
+            }
+        };
+
+        function parseGptJson(text) {
+            text = text.trim();
+            if (text.startsWith('[') && text.endsWith(']')) {
+                return JSON.parse(text);
+            }
+            return text.split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
+        }
+
+        // 模式切换
+        function switchMode(mode) {
+            document.querySelectorAll('[id^="mode-"]').forEach(el => el.classList.add('hidden'));
+            document.getElementById(`mode-${mode}`).classList.remove('hidden');
+            
+            document.querySelectorAll('[id^="btn-"]').forEach(btn => {
+                btn.className = "flex-1 py-2 text-sm font-bold rounded-lg transition-all text-slate-500 hover:bg-slate-50";
+            });
+            const activeBtn = document.getElementById(`btn-${mode}`);
+            activeBtn.className = "flex-1 py-2 text-sm font-bold rounded-lg transition-all bg-indigo-600 text-white shadow-md";
+            
+            currentMode = mode;
+            if (mode === 'quiz') startNewQuiz();
+        }
+
+        // --- 探索模式 ---
+        function renderExplore() {
+            const container = document.getElementById('exploreList');
+            const query = document.getElementById('searchInput').value.toLowerCase();
+            const filtered = words.filter(w => w.word.toLowerCase().includes(query) || (w.content && w.content.toLowerCase().includes(query)));
+            
+            container.innerHTML = filtered.slice(0, 50).map((w, idx) => `
+                <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 hover:border-indigo-200 transition-all group">
+                    <div class="flex justify-between items-start mb-2">
+                        <h3 class="text-xl font-bold text-slate-800">${w.word}</h3>
+                        <button onclick="toggleMastered('${w.word}')" class="text-xl grayscale group-hover:grayscale-0 transition-all">
+                            ${masteredWords.has(w.word) ? '✅' : '⚪'}
+                        </button>
+                    </div>
+                    <div class="content-body text-xs text-slate-600 line-clamp-3">${formatContent(w.content)}</div>
                 </div>
             `).join('');
-
-            if (words.length > 100) {
-                wordListEl.innerHTML += `<p class="text-center text-slate-400 py-4 text-sm">仅显示前 100 个结果...</p>`;
-            }
         }
 
-        // 简单的 Markdown 格式化处理
+        document.getElementById('searchInput').oninput = renderExplore;
+
+        // --- 闪卡模式 ---
+        function flipCard() {
+            document.getElementById('flashcard').classList.toggle('flipped');
+        }
+
+        function updateFlashcard() {
+            if (words.length === 0) return;
+            const w = words[cardIdx];
+            document.getElementById('flashcard').classList.remove('flipped');
+            setTimeout(() => {
+                document.getElementById('cardWord').textContent = w.word;
+                document.getElementById('cardContent').innerHTML = formatContent(w.content);
+                document.getElementById('cardProgress').textContent = `${cardIdx + 1}/${words.length}`;
+            }, 150);
+        }
+
+        function nextCard() { cardIdx = (cardIdx + 1) % words.length; updateFlashcard(); }
+        function prevCard() { cardIdx = (cardIdx - 1 + words.length) % words.length; updateFlashcard(); }
+
+        function markMasteredFromCard() {
+            toggleMastered(words[cardIdx].word);
+            nextCard();
+        }
+
+        // --- 挑战模式 ---
+        function startNewQuiz() {
+            if (words.length < 4) return;
+            const feedback = document.getElementById('quizFeedback');
+            feedback.classList.add('hidden');
+            
+            // 随机选一个单词
+            const target = words[Math.floor(Math.random() * words.length)];
+            quizTarget = target;
+            document.getElementById('quizWord').textContent = target.word;
+            
+            // 生成选项
+            let options = [target];
+            while (options.length < 4) {
+                let r = words[Math.floor(Math.random() * words.length)];
+                if (!options.includes(r)) options.push(r);
+            }
+            options.sort(() => Math.random() - 0.5);
+            
+            document.getElementById('quizOptions').innerHTML = options.map(opt => `
+                <button onclick="checkAnswer('${opt.word}')" class="w-full text-left p-4 rounded-xl border-2 border-slate-100 hover:border-indigo-300 hover:bg-indigo-50 transition-all font-medium text-slate-700">
+                    ${getShortDefinition(opt.content)}
+                </button>
+            `).join('');
+        }
+
+        function checkAnswer(word) {
+            const feedback = document.getElementById('quizFeedback');
+            feedback.classList.remove('hidden');
+            
+            if (word === quizTarget.word) {
+                feedback.textContent = "太棒了！答对了 🌟";
+                feedback.className = "mt-6 p-4 rounded-xl text-center font-bold bg-green-100 text-green-700";
+                addXP(10);
+                document.getElementById('quizScore').classList.add('animate-celebrate');
+                setTimeout(() => document.getElementById('quizScore').classList.remove('animate-celebrate'), 500);
+            } else {
+                feedback.textContent = `哎呀，答错了。正确答案是: ${quizTarget.word}`;
+                feedback.className = "mt-6 p-4 rounded-xl text-center font-bold bg-red-100 text-red-700";
+            }
+            
+            setTimeout(startNewQuiz, 1500);
+        }
+
+        // --- 工具函数 ---
+        function toggleMastered(word) {
+            if (masteredWords.has(word)) {
+                masteredWords.delete(word);
+            } else {
+                masteredWords.add(word);
+                addXP(5);
+                showToast(`已掌握单词: ${word}`, "🎯");
+            }
+            localStorage.setItem('masteredWords', JSON.stringify([...masteredWords]));
+            renderExplore();
+            updateStats();
+        }
+
+        function addXP(amount) {
+            xp += amount;
+            localStorage.setItem('xp', xp);
+            updateStats();
+        }
+
+        function updateStats() {
+            document.getElementById('xpVal').textContent = xp;
+            document.getElementById('streakVal').textContent = streak;
+            document.getElementById('quizScore').textContent = `得分: ${xp}`;
+        }
+
+        function showToast(msg, icon = '💡') {
+            const toast = document.getElementById('toast');
+            document.getElementById('toastMsg').textContent = msg;
+            document.getElementById('toastIcon').textContent = icon;
+            toast.className = "fixed bottom-10 left-1/2 -translate-x-1/2 transform scale-100 transition-transform bg-slate-800 text-white px-6 py-3 rounded-full shadow-2xl z-50 flex items-center gap-2";
+            setTimeout(() => { toast.classList.add('scale-0'); toast.classList.remove('scale-100'); }, 3000);
+        }
+
+        function getShortDefinition(content) {
+            if (!content) return "暂无解析";
+            const firstLine = content.split('\n')[0].replace(/#|\*|分析词义:|分析词义/g, '').trim();
+            return firstLine.substring(0, 60) + (firstLine.length > 60 ? '...' : '');
+        }
+
         function formatContent(content) {
             if (!content) return '';
             return content
@@ -139,17 +347,6 @@
                 .replace(/^\* (.*$)/gim, '<li>$1</li>')
                 .replace(/\n\n/g, '<p></p>');
         }
-
-        searchInput.addEventListener('input', (e) => {
-            const query = e.target.value.toLowerCase();
-            const filtered = allWords.filter(item => 
-                item.word.toLowerCase().includes(query) || 
-                (item.content && item.content.toLowerCase().includes(query))
-            );
-            renderWords(filtered);
-        });
-
-        loadBtn.addEventListener('click', loadData);
     </script>
 </body>
 </html>
