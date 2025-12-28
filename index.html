@@ -3,286 +3,153 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI 智能英语词汇手册</title>
+    <title>GPT 单词库查看器</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap');
-        body { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
-        .hide-scrollbar::-webkit-scrollbar { display: none; }
-        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-        .markdown-content p { margin-bottom: 0.75rem; }
+        .markdown-content h3 { font-weight: bold; font-size: 1.25rem; margin-top: 1rem; margin-bottom: 0.5rem; color: #1e40af; }
+        .markdown-content p { margin-bottom: 0.75rem; line-height: 1.6; }
+        .markdown-content ul { list-style-type: disc; padding-left: 1.5rem; margin-bottom: 1rem; }
+        .word-card:hover { transform: translateY(-2px); transition: all 0.2s; }
     </style>
 </head>
-<body class="bg-slate-50">
-    <div id="root"></div>
+<body class="bg-slate-50 min-h-screen">
 
-    <script type="text/babel">
-        const { useState, useEffect, useMemo } = React;
+    <div class="max-w-4xl mx-auto px-4 py-8">
+        <header class="mb-8 text-center">
+            <h1 class="text-3xl font-bold text-slate-800 mb-2">GPT 英语单词库</h1>
+            <p class="text-slate-600">加载并浏览您的词库文件</p>
+        </header>
 
-        // 图标组件
-        const LucideIcon = ({ name, size = 20, className = "" }) => {
-            useEffect(() => { if (window.lucide) window.lucide.createIcons(); }, [name]);
-            return <i data-lucide={name} style={{ width: size, height: size }} className={`inline-block ${className}`}></i>;
-        };
+        <!-- 搜索和过滤 -->
+        <div class="sticky top-4 z-10 bg-white p-4 rounded-xl shadow-md mb-6 flex gap-4">
+            <input type="text" id="searchInput" placeholder="搜索单词..." 
+                class="flex-1 px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <button id="loadBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg transition-colors shadow-sm">
+                载入数据
+            </button>
+        </div>
 
-        // Markdown 内容解析器
-        const parseWordContent = (content) => {
-            if (!content) return {};
-            const sections = {};
-            const parts = content.split(/(?=###|\*\*)/);
-            
-            parts.forEach(part => {
-                const titleMatch = part.match(/(?:###|\*\*)(.*?)(?:###|\*\*|:)/);
-                if (titleMatch) {
-                    const title = titleMatch[1].trim();
-                    const body = part.replace(/(###|\*\*).*?(###|\*\*|:)/, '').trim();
-                    if (title.includes('词义')) sections.meaning = body;
-                    else if (title.includes('例句')) sections.examples = body;
-                    else if (title.includes('词根') || title.includes('词缀')) sections.analysis = (sections.analysis || '') + '\n' + body;
-                    else if (title.includes('背景') || title.includes('历史')) sections.story = body;
-                    else if (title.includes('变形')) sections.forms = body;
-                    else sections.misc = (sections.misc || '') + '\n' + body;
+        <!-- 状态提示 -->
+        <div id="status" class="hidden mb-4 p-3 rounded-lg text-sm text-center"></div>
+
+        <!-- 单词列表 -->
+        <div id="wordList" class="space-y-4">
+            <div class="text-center py-20 text-slate-400">
+                <p>点击“载入数据”开始读取 gptwords.json</p>
+                <p class="text-xs mt-2 text-slate-400">请确保文件与本页面在同一目录下</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let allWords = [];
+        const wordListEl = document.getElementById('wordList');
+        const searchInput = document.getElementById('searchInput');
+        const statusEl = document.getElementById('status');
+        const loadBtn = document.getElementById('loadBtn');
+
+        function showStatus(msg, type = 'info') {
+            statusEl.textContent = msg;
+            statusEl.className = `mb-4 p-3 rounded-lg text-sm text-center ${
+                type === 'error' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'
+            }`;
+            statusEl.classList.remove('hidden');
+        }
+
+        // 解析逻辑：兼容标准 JSON 和 JSONL (每行一个对象)
+        async function parseGptJson(text) {
+            text = text.trim();
+            // 尝试直接解析为标准 JSON
+            try {
+                if (text.startsWith('[') && text.endsWith(']')) {
+                    return JSON.parse(text);
                 }
-            });
-            return sections;
-        };
+            } catch (e) {}
 
-        const App = () => {
-            const [rawData, setRawData] = useState([]); // 存储从 JSON 加载的数据
-            const [loading, setLoading] = useState(true);
-            const [error, setError] = useState(null);
-            const [selectedIndex, setSelectedIndex] = useState(0);
-            const [searchQuery, setSearchQuery] = useState("");
-            const [activeTab, setActiveTab] = useState('meaning');
-            const [mastery, setMastery] = useState({});
-
-            // --- 核心功能：从外部 JSON 文件异步获取数据 ---
-            useEffect(() => {
-                const loadData = async () => {
+            // 如果失败，尝试按行解析 (JSONL 格式)
+            showStatus("检测到非标准格式，正在尝试逐行解析...", "info");
+            const lines = text.split('\n');
+            const result = [];
+            for (let line of lines) {
+                if (line.trim()) {
                     try {
-                        // 在 GitHub Pages 上，它会尝试访问与 index.html 同目录下的 gptwords.json
-                        const response = await fetch('./gptwords.json');
-                        if (!response.ok) throw new Error('无法读取 gptwords.json 文件');
-                        const data = await response.json();
-                        setRawData(data);
-                        setLoading(false);
-                    } catch (err) {
-                        console.error(err);
-                        setError(err.message);
-                        setLoading(false);
+                        result.push(JSON.parse(line));
+                    } catch (e) {
+                        console.error("解析单行失败:", e);
                     }
-                };
-                loadData();
-
-                const saved = localStorage.getItem('word_progress');
-                if (saved) setMastery(JSON.parse(saved));
-            }, []);
-
-            const currentWord = rawData[selectedIndex];
-            const sections = useMemo(() => currentWord ? parseWordContent(currentWord.content) : {}, [selectedIndex, rawData]);
-
-            const filteredWords = rawData.filter(item => 
-                item.word.toLowerCase().includes(searchQuery.toLowerCase())
-            );
-
-            const updateProgress = (word, section) => {
-                setMastery(prev => {
-                    const wordState = prev[word] || { seen: [] };
-                    if (!wordState.seen.includes(section)) {
-                        const newState = { ...prev, [word]: { seen: [...wordState.seen, section] } };
-                        localStorage.setItem('word_progress', JSON.stringify(newState));
-                        return newState;
-                    }
-                    return prev;
-                });
-            };
-
-            const getWordProgress = (word) => {
-                const seenCount = (mastery[word]?.seen || []).length;
-                return Math.min(Math.round((seenCount / 4) * 100), 100);
-            };
-
-            const speak = (text) => {
-                if ('speechSynthesis' in window) {
-                    window.speechSynthesis.cancel();
-                    const u = new SpeechSynthesisUtterance(text);
-                    u.lang = 'en-US';
-                    window.speechSynthesis.speak(u);
                 }
-            };
+            }
+            return result;
+        }
 
-            // 加载状态 UI
-            if (loading) return (
-                <div className="h-screen flex items-center justify-center bg-slate-50">
-                    <div className="text-center">
-                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
-                        <p className="text-slate-500 font-bold">正在同步词库数据...</p>
-                    </div>
+        async function loadData() {
+            loadBtn.disabled = true;
+            loadBtn.textContent = '加载中...';
+            showStatus("正在请求文件...");
+
+            try {
+                // 如果在本地双击打开（file:// 协议），fetch 可能会失败
+                if (window.location.protocol === 'file:') {
+                    throw new Error("浏览器安全限制：请使用本地服务器打开此页面（如使用 VS Code 的 Live Server 或 Python 的 http.server）");
+                }
+
+                const response = await fetch('gptwords.json');
+                if (!response.ok) throw new Error(`无法找到文件: ${response.status}`);
+                
+                const rawText = await response.text();
+                allWords = await parseGptJson(rawText);
+                
+                showStatus(`成功加载 ${allWords.length} 个单词`, "success");
+                renderWords(allWords);
+            } catch (err) {
+                showStatus(err.message, "error");
+                console.error(err);
+            } finally {
+                loadBtn.disabled = false;
+                loadBtn.textContent = '重新载入';
+            }
+        }
+
+        function renderWords(words) {
+            if (words.length === 0) {
+                wordListEl.innerHTML = '<div class="text-center py-10 text-slate-400">没有找到匹配的单词</div>';
+                return;
+            }
+
+            // 仅渲染前 100 个以保证性能，搜索时全量搜索
+            const displayWords = words.slice(0, 100);
+            
+            wordListEl.innerHTML = displayWords.map(item => `
+                <div class="word-card bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+                    <h2 class="text-2xl font-bold text-blue-700 mb-3">${item.word}</h2>
+                    <div class="markdown-content text-slate-700 whitespace-pre-wrap">${formatContent(item.content)}</div>
                 </div>
+            `).join('');
+
+            if (words.length > 100) {
+                wordListEl.innerHTML += `<p class="text-center text-slate-400 py-4 text-sm">仅显示前 100 个结果...</p>`;
+            }
+        }
+
+        // 简单的 Markdown 格式化处理
+        function formatContent(content) {
+            if (!content) return '';
+            return content
+                .replace(/^### (.*$)/gim, '<h3>$1</h3>')
+                .replace(/^\* (.*$)/gim, '<li>$1</li>')
+                .replace(/\n\n/g, '<p></p>');
+        }
+
+        searchInput.addEventListener('input', (e) => {
+            const query = e.target.value.toLowerCase();
+            const filtered = allWords.filter(item => 
+                item.word.toLowerCase().includes(query) || 
+                (item.content && item.content.toLowerCase().includes(query))
             );
+            renderWords(filtered);
+        });
 
-            // 错误处理 UI
-            if (error) return (
-                <div className="h-screen flex items-center justify-center bg-slate-50 p-6">
-                    <div className="bg-white p-8 rounded-3xl shadow-xl max-w-md text-center">
-                        <LucideIcon name="alert-triangle" size={48} className="text-red-500 mb-4" />
-                        <h2 className="text-xl font-bold mb-2">数据加载失败</h2>
-                        <p className="text-slate-500 mb-6 text-sm">请确保你的仓库中包含名为 <code className="bg-slate-100 px-1 rounded">gptwords.json</code> 的文件，且格式正确。</p>
-                        <button onClick={() => window.location.reload()} className="bg-indigo-600 text-white px-6 py-2 rounded-xl font-bold">重试</button>
-                    </div>
-                </div>
-            );
-
-            return (
-                <div className="flex flex-col md:flex-row h-screen overflow-hidden bg-slate-50">
-                    {/* Sidebar */}
-                    <aside className="w-full md:w-80 bg-white border-r border-slate-200 flex flex-col h-1/3 md:h-full shadow-sm">
-                        <div className="p-6">
-                            <h2 className="text-xl font-black text-indigo-600 mb-4 flex items-center">
-                                <LucideIcon name="library" className="mr-2" /> AI 词汇手册
-                            </h2>
-                            <div className="relative">
-                                <LucideIcon name="search" size={16} className="absolute left-3 top-3 text-slate-400" />
-                                <input 
-                                    type="text" 
-                                    placeholder="快速搜索..." 
-                                    className="w-full pl-10 pr-4 py-2 bg-slate-100 border-none rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-                                    value={searchQuery}
-                                    onChange={(e) => setSearchQuery(e.target.value)}
-                                />
-                            </div>
-                        </div>
-                        <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-2">
-                            {filteredWords.map((item, idx) => {
-                                const realIdx = rawData.findIndex(r => r.word === item.word);
-                                const progress = getWordProgress(item.word);
-                                return (
-                                    <button
-                                        key={item.word}
-                                        onClick={() => { setSelectedIndex(realIdx); setActiveTab('meaning'); }}
-                                        className={`w-full text-left p-4 rounded-2xl transition-all group relative overflow-hidden ${
-                                            selectedIndex === realIdx ? 'bg-indigo-600 text-white shadow-lg' : 'bg-white hover:bg-slate-50 border border-slate-100'
-                                        }`}
-                                    >
-                                        <div className="flex justify-between items-center relative z-10">
-                                            <span className="font-bold text-lg">{item.word}</span>
-                                            <span className={`text-[10px] px-2 py-0.5 rounded-full ${selectedIndex === realIdx ? 'bg-indigo-500' : 'bg-slate-100 text-slate-400'}`}>
-                                                {progress}%
-                                            </span>
-                                        </div>
-                                        {progress > 0 && selectedIndex !== realIdx && (
-                                            <div className="absolute bottom-0 left-0 h-1 bg-emerald-400 transition-all" style={{ width: `${progress}%` }}></div>
-                                        )}
-                                    </button>
-                                );
-                            })}
-                        </div>
-                    </aside>
-
-                    {/* Main Content */}
-                    <main className="flex-1 overflow-y-auto p-4 md:p-12">
-                        {currentWord && (
-                            <div className="max-w-3xl mx-auto">
-                                <div className="bg-white rounded-[2.5rem] p-8 md:p-12 shadow-sm border border-slate-100 mb-8 relative overflow-hidden">
-                                    <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-50 rounded-full -mr-16 -mt-16 opacity-50"></div>
-                                    <div className="absolute top-8 right-8 z-10">
-                                        <button 
-                                            onClick={() => speak(currentWord.word)}
-                                            className="p-4 bg-indigo-50 text-indigo-600 rounded-2xl hover:bg-indigo-600 hover:text-white transition-all shadow-sm"
-                                        >
-                                            <LucideIcon name="volume-2" size={28} />
-                                        </button>
-                                    </div>
-                                    <h1 className="text-6xl font-black text-slate-900 mb-4 relative z-10">{currentWord.word}</h1>
-                                    <div className="flex items-center space-x-4 relative z-10">
-                                        <span className="px-4 py-1.5 bg-emerald-50 text-emerald-600 rounded-full text-sm font-bold flex items-center">
-                                            <LucideIcon name="check-circle" size={14} className="mr-1.5" /> 掌握进度 {getWordProgress(currentWord.word)}%
-                                        </span>
-                                    </div>
-                                </div>
-
-                                <div className="flex flex-wrap gap-2 mb-8">
-                                    {[
-                                        { id: 'meaning', label: '核心释义', icon: 'book-open' },
-                                        { id: 'analysis', label: '词源解析', icon: 'compass' },
-                                        { id: 'story', label: '背景知识', icon: 'info' }
-                                    ].map(tab => (
-                                        <button
-                                            key={tab.id}
-                                            onClick={() => { setActiveTab(tab.id); updateProgress(currentWord.word, tab.id); }}
-                                            className={`flex items-center px-6 py-3 rounded-2xl font-bold transition-all ${
-                                                activeTab === tab.id ? 'bg-slate-900 text-white shadow-xl scale-105' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-50'
-                                            }`}
-                                        >
-                                            <LucideIcon name={tab.icon} size={18} className="mr-2" /> {tab.label}
-                                        </button>
-                                    ))}
-                                </div>
-
-                                <div className="bg-white rounded-[2.5rem] p-8 md:p-12 shadow-sm border border-slate-100 min-h-[400px]">
-                                    {activeTab === 'meaning' && (
-                                        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                                            <div className="mb-10">
-                                                <h3 className="text-sm font-black text-indigo-400 uppercase tracking-widest mb-4 italic underline decoration-2">词义深度分析</h3>
-                                                <div className="text-xl text-slate-700 leading-relaxed markdown-content" dangerouslySetInnerHTML={{ __html: (sections.meaning || "暂无描述").replace(/\n/g, '<br/>') }} />
-                                            </div>
-                                            <div>
-                                                <h3 className="text-sm font-black text-emerald-400 uppercase tracking-widest mb-6">情境模拟例句</h3>
-                                                <div className="space-y-4">
-                                                    {(sections.examples || "").split(/\d\./).filter(Boolean).map((ex, i) => (
-                                                        <div key={i} className="p-6 bg-slate-50 rounded-2xl border border-transparent hover:border-emerald-100 hover:bg-emerald-50/30 transition-all cursor-pointer group" onClick={() => speak(ex.split('(')[0])}>
-                                                            <div className="flex items-start">
-                                                                <div className="mr-4 mt-1 text-slate-300 group-hover:text-emerald-500 transition-colors"><LucideIcon name="play" size={16} /></div>
-                                                                <p className="text-lg font-medium text-slate-700">{ex.trim()}</p>
-                                                            </div>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {activeTab === 'analysis' && (
-                                        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-8">
-                                            <div>
-                                                <h3 className="text-sm font-black text-amber-400 uppercase tracking-widest mb-4">词根与构词</h3>
-                                                <div className="p-8 bg-amber-50 rounded-[2rem] border border-amber-100 text-amber-900 leading-relaxed italic text-lg shadow-inner">
-                                                    {sections.analysis || "暂无词源详细分析"}
-                                                </div>
-                                            </div>
-                                            {sections.forms && (
-                                                <div>
-                                                    <h3 className="text-sm font-black text-purple-400 uppercase tracking-widest mb-4">词形变化</h3>
-                                                    <div className="p-6 bg-purple-50 rounded-2xl border border-purple-100 text-purple-700 font-mono">
-                                                        {sections.forms}
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
-
-                                    {activeTab === 'story' && (
-                                        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                                            <h3 className="text-sm font-black text-blue-400 uppercase tracking-widest mb-4">文化故事与起源</h3>
-                                            <div className="p-8 bg-blue-50/50 rounded-[2rem] border border-blue-100 text-slate-600 leading-relaxed text-lg italic shadow-inner">
-                                                {sections.story || sections.misc || "目前没有相关的背景故事。"}
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        )}
-                    </main>
-                </div>
-            );
-        };
-
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
+        loadBtn.addEventListener('click', loadData);
     </script>
 </body>
 </html>
